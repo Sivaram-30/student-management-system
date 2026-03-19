@@ -495,6 +495,7 @@
                   <option>Management</option>
                 </select>
                 <button class="btn btn-primary btn-sm" onclick="loadStudents()">🔄 Refresh</button>
+<button class="btn btn-success btn-sm" onclick="saveDataOffline()">💾 Save Offline</button>
               </div>
             </div>
             <div class="table-wrapper">
@@ -832,29 +833,56 @@ let demoStudents = [
   { id:8,firstName:'Henry',lastName:'Taylor',email:'henry@example.com',phoneNumber:'9876543217',dateOfBirth:'2002-02-14',course:'B.Tech Civil',department:'Civil Engineering',enrollmentYear:2022,cgpa:7.2,status:'ACTIVE',createdAt:'2024-01-22T17:00:00' },
 ];
 let nextId = 9;
-let demoMode = true; // will try real API first
+let demoMode = false; // will try real API first
 
 // ========================================================
 // API HELPERS
 // ========================================================
 async function apiCall(method, endpoint, body) {
-  if (demoMode) return demoAPI(method, endpoint, body);
   try {
     const opts = {
       method,
-      headers: { 'Content-Type':'application/json', ...(token ? { Authorization:`Bearer ${token}` } : {}) }
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {})
+      }
     };
     if (body) opts.body = JSON.stringify(body);
+
     const res = await fetch(API + endpoint, opts);
     const data = await res.json();
     if (!res.ok) throw new Error(data.message || 'Request failed');
+
+    // ✅ Save to localStorage when online
+    if (method === 'GET' && endpoint.includes('/students')) {
+      localStorage.setItem('saved_' + endpoint, JSON.stringify(data));
+      console.log('✅ Data saved to localStorage');
+    }
+
     return data;
+
   } catch(e) {
-    if (e.name === 'TypeError') { demoMode = true; return demoAPI(method, endpoint, body); }
+    // ✅ If offline → load from localStorage
+    if (e.name === 'TypeError' ||
+        e.message.includes('Failed to fetch')) {
+
+      demoMode = true;
+      document.getElementById('tokenBadge').textContent = '📴 Offline Mode';
+
+      // Try to load saved data
+      const saved = localStorage.getItem('saved_' + endpoint);
+      if (saved) {
+        showToast('📴 Offline — showing saved data', 'info');
+        return JSON.parse(saved);
+      }
+
+      // If no saved data → use demo data
+      showToast('📴 Offline Mode — no saved data found', 'info');
+      return demoAPI(method, endpoint, body);
+    }
     throw e;
   }
 }
-
 // Demo API simulation
 function demoAPI(method, endpoint, body) {
   return new Promise(resolve => setTimeout(() => {
@@ -913,7 +941,7 @@ async function doLogin() {
     document.getElementById('sidebarUsername').textContent = data.username;
     document.getElementById('sidebarRole').textContent = (data.roles||[])[0] || '';
     document.getElementById('sidebarAvatar').textContent = data.username[0].toUpperCase();
-    document.getElementById('tokenBadge').textContent = demoMode ? '🔵 Demo Mode' : '🟢 Connected';
+    document.getElementById('tokenBadge').textContent = demoMode ? '📴 Offline Mode' : '🟢 Connected';
     loadDashboard();
     showToast('Welcome back, ' + data.username + '!', 'success');
   } catch(e) {
@@ -1236,7 +1264,45 @@ function cgpaColor(cgpa) {
   if (cgpa >= 7.0) return '#f59e0b';
   return '#ef4444';
 }
+// ========================================================
+// SAVE DATA FOR OFFLINE USE
+// ========================================================
+async function saveDataOffline() {
+  try {
+    showLoading(true);
 
+    // Save students list
+    const students = await fetch(
+      API + '/students?page=0&size=100', {
+      headers: { Authorization: `Bearer ${token}` }
+    }).then(r => r.json());
+    localStorage.setItem(
+      'saved_/students?page=0&size=100',
+      JSON.stringify(students)
+    );
+
+    // Save stats
+    const stats = await fetch(
+      API + '/students/stats', {
+      headers: { Authorization: `Bearer ${token}` }
+    }).then(r => r.json());
+    localStorage.setItem(
+      'saved_/students/stats',
+      JSON.stringify(stats)
+    );
+
+    showToast(
+      '✅ Data saved! Works offline now.',
+      'success'
+    );
+    console.log('✅ All data saved to localStorage');
+
+  } catch(e) {
+    showToast('❌ Could not save: ' + e.message, 'error');
+  } finally {
+    showLoading(false);
+  }
+}
 // Keyboard shortcuts
 document.getElementById('loginPass').addEventListener('keydown', e => { if (e.key==='Enter') doLogin(); });
 document.addEventListener('keydown', e => {
